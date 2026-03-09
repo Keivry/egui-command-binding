@@ -1,0 +1,12 @@
+[package]
+name = "egui-command-binding"
+version = "0.1.0"
+edition = "2024"
+description = "egui integration for egui-command: shortcut matching → CommandId dispatch"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+egui = "0.33"
+egui-command = { git = "https://github.com/keivry/egui-command.git", branch = "main" }
+parking_lot = "0.12"
+thiserror = "2"
