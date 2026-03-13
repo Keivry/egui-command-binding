@@ -71,18 +71,18 @@ dependencies = [
 [[package]]
 name = "egui-command"
 version = "0.1.0"
+source = "git+https://github.com/keivry/egui-command.git?branch=main#2bbdab2251728b608b3f573a4bf3b64065cd141c"
 dependencies = [
  "rustc-hash",
 ]
 
 [[package]]
 name = "egui-command-binding"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "egui",
  "egui-command",
  "parking_lot",
- "thiserror",
 ]
 
 [[package]]
@@ -239,26 +239,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "thiserror"
-version = "2.0.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4"
-dependencies = [
- "thiserror-impl",
-]
-
-[[package]]
-name = "thiserror-impl"
-version = "2.0.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

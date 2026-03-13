@@ -27,14 +27,7 @@ use {
     egui_command::{CommandId, CommandSource, CommandTriggered},
     parking_lot::RwLock,
     std::{collections::HashMap, sync::Arc},
-    thiserror::Error,
 };
-
-#[derive(Error, Debug)]
-pub enum ShortcutError {
-    #[error("No key registered for shortcut")]
-    NotFound,
-}
 
 /// A keyboard shortcut: a key plus zero-or-more modifier keys.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -57,6 +50,7 @@ pub struct ShortcutScope<C> {
 }
 
 impl<C> ShortcutScope<C> {
+    /// Creates a new scope with the given name, shortcut map, and consume flag.
     pub fn new(name: &'static str, shortcuts: ShortcutMap<C>, consume: bool) -> Self {
         Self {
             name,
@@ -83,10 +77,13 @@ impl<C: Clone> ShortcutManager<C> {
         }
     }
 
+    /// Pushes a new scope onto the stack. Scopes are checked top-to-bottom during dispatch.
     pub fn push_scope(&mut self, scope: ShortcutScope<C>) { self.stack.push(scope); }
 
+    /// Removes the top scope from the stack.
     pub fn pop_scope(&mut self) { self.stack.pop(); }
 
+    /// Inserts or replaces a shortcut in the shared global map.
     pub fn register_global(&mut self, sc: Shortcut, cmd: C) { self.global.write().insert(sc, cmd); }
 
     /// Scan egui key events and return all triggered commands this frame.
@@ -151,6 +148,7 @@ impl<C: Clone> ShortcutManager<C> {
                 let egui::Event::Key {
                     key,
                     pressed: true,
+                    repeat: false,
                     modifiers,
                     ..
                 } = event
@@ -241,8 +239,79 @@ pub fn shortcut(sc: &str) -> Shortcut {
 #[macro_export]
 macro_rules! shortcut_map {
     ($($key:expr => $cmd:expr),* $(,)?) => {{
+        #[allow(unused_mut)]
         let mut map = $crate::ShortcutMap::new();
         $(map.insert($crate::shortcut($key), $cmd);)*
         map
     }};
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        egui::{Key, Modifiers},
+    };
+
+    #[test]
+    fn shortcut_single_key() {
+        let sc = shortcut("F1");
+        assert_eq!(sc.key, Key::F1);
+        assert_eq!(sc.mods, Modifiers::default());
+    }
+
+    #[test]
+    fn shortcut_ctrl_s() {
+        let sc = shortcut("Ctrl+S");
+        assert_eq!(sc.key, Key::S);
+        assert!(sc.mods.ctrl);
+        assert!(!sc.mods.alt);
+        assert!(!sc.mods.shift);
+    }
+
+    #[test]
+    fn shortcut_alt_shift_x() {
+        let sc = shortcut("Alt+Shift+X");
+        assert_eq!(sc.key, Key::X);
+        assert!(sc.mods.alt);
+        assert!(sc.mods.shift);
+        assert!(!sc.mods.ctrl);
+    }
+
+    #[test]
+    fn shortcut_control_alias() {
+        let sc = shortcut("Control+A");
+        assert!(sc.mods.ctrl);
+        assert_eq!(sc.key, Key::A);
+    }
+
+    #[test]
+    #[should_panic]
+    fn shortcut_invalid_key_panics() { shortcut("Ctrl+NotAKey"); }
+
+    #[test]
+    fn shortcut_map_macro_builds_correctly() {
+        let map = shortcut_map![
+            "F1" => 1u32,
+            "F2" => 2u32,
+        ];
+        assert_eq!(map.get(&shortcut("F1")), Some(&1u32));
+        assert_eq!(map.get(&shortcut("F2")), Some(&2u32));
+        assert_eq!(map.get(&shortcut("F3")), None);
+    }
+
+    #[test]
+    fn shortcut_map_macro_empty() {
+        let map: ShortcutMap<u32> = shortcut_map![];
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn shortcut_equality_and_hash() {
+        use std::collections::HashMap;
+        let mut m: HashMap<Shortcut, &str> = HashMap::new();
+        m.insert(shortcut("Ctrl+S"), "save");
+        assert_eq!(m[&shortcut("Ctrl+S")], "save");
+        assert!(!m.contains_key(&shortcut("Ctrl+Z")));
+    }
 }
