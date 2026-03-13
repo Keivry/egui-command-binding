@@ -70,8 +70,9 @@ dependencies = [
 
 [[package]]
 name = "egui-command"
-version = "0.1.0"
-source = "git+https://github.com/keivry/egui-command.git?branch=main#2bbdab2251728b608b3f573a4bf3b64065cd141c"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73e4bbd413a0f2894a4ce906cb4409f2d38f4a348d41fc2b2da8b34d5d6bc224"
 dependencies = [
  "rustc-hash",
 ]

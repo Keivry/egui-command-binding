@@ -4,10 +4,12 @@ version = "0.1.1"
 edition = "2024"
 description = "egui integration for egui-command: shortcut matching → CommandId dispatch"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/Keivry/egui-command-binding"
+homepage = "https://github.com/Keivry/egui-command-binding"
 keywords = ["egui", "shortcut", "keybinding", "hotkey", "command"]
 categories = ["gui"]
 
 [dependencies]
 egui = "0.33"
-egui-command = { git = "https://github.com/keivry/egui-command.git", branch = "main" }
+egui-command = "0.1.1"
 parking_lot = "0.12"
