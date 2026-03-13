@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! `egui-command-binding` — keyboard shortcut → [`CommandId`] dispatch for egui apps.
 //!
 //! Wraps `egui-command` types with egui-specific input handling.
@@ -23,7 +25,7 @@
 
 pub use egui_command;
 use {
-    egui::{Context, Key, Modifiers},
+    egui::{Context, Key, KeyboardShortcut, Modifiers},
     egui_command::{CommandId, CommandSource, CommandTriggered},
     parking_lot::RwLock,
     std::{collections::HashMap, sync::Arc},
@@ -42,7 +44,8 @@ pub type ShortcutMap<C> = HashMap<Shortcut, C>;
 /// A named, optionally-consuming scope of shortcuts.
 ///
 /// Scopes are pushed/popped by context (e.g. while an editor view is active).
-/// When `consume = true`, a match in this scope stops propagation to lower scopes.
+/// When `consume = true`, a match in this scope stops propagation to lower scopes
+/// and to the global map.
 pub struct ShortcutScope<C> {
     pub name: &'static str,
     pub shortcuts: ShortcutMap<C>,
@@ -62,8 +65,10 @@ impl<C> ShortcutScope<C> {
 
 /// Scans egui key events each frame and returns triggered commands.
 ///
-/// Lookup order: scoped stack (top → bottom) → global.
-/// The first consuming scope that matches stops propagation.
+/// Lookup order: extra scope → scoped stack (top → bottom) → global.
+/// Non-consuming scopes continue propagation; consuming scopes stop lower scopes
+/// and the global map. Within one scope/map, the most specific logical shortcut
+/// wins.
 pub struct ShortcutManager<C> {
     global: Arc<RwLock<ShortcutMap<C>>>,
     stack: Vec<ShortcutScope<C>>,
@@ -136,13 +141,13 @@ impl<C: Clone> ShortcutManager<C> {
     /// Shared implementation for all dispatch variants.
     ///
     /// Does **not** check `wants_keyboard_input`; callers are responsible for
-    /// that guard.  `extra`, when provided, is checked first and always consumes
+    /// that guard. `extra`, when provided, is checked first and always consumes
     /// (a match there skips the scoped stack and global map for that key).
     fn dispatch_raw_inner(&self, ctx: &Context, extra: Option<&ShortcutMap<C>>) -> Vec<C> {
         let mut triggered: Vec<C> = Vec::new();
 
         ctx.input_mut(|input| {
-            let mut consumed: Vec<Shortcut> = Vec::new();
+            let mut consumed: Vec<KeyboardShortcut> = Vec::new();
 
             for event in &input.events {
                 let egui::Event::Key {
@@ -155,49 +160,70 @@ impl<C: Clone> ShortcutManager<C> {
                 else {
                     continue;
                 };
-                let sc = Shortcut {
-                    key: *key,
-                    mods: *modifiers,
-                };
 
                 // Extra scope has highest priority and is always consuming.
                 if let Some(extra_map) = extra
-                    && let Some(cmd) = extra_map.get(&sc)
+                    && let Some((shortcut, cmd)) = best_shortcut_match(extra_map, *key, *modifiers)
                 {
                     triggered.push(cmd.clone());
-                    consumed.push(sc);
+                    consumed.push(shortcut.to_keyboard_shortcut());
                     continue;
                 }
 
-                // Scoped stack: top of stack first, stop at first consuming scope.
-                let mut matched = false;
-                'scopes: for scope in self.stack.iter().rev() {
-                    if let Some(cmd) = scope.shortcuts.get(&sc) {
+                let mut stop_propagation = false;
+                for scope in self.stack.iter().rev() {
+                    if let Some((shortcut, cmd)) = best_shortcut_match(&scope.shortcuts, *key, *modifiers) {
                         triggered.push(cmd.clone());
-                        consumed.push(sc);
-                        matched = true;
+                        consumed.push(shortcut.to_keyboard_shortcut());
                         if scope.consume {
-                            break 'scopes;
+                            stop_propagation = true;
+                            break;
                         }
                     }
                 }
-                if matched {
+                if stop_propagation {
                     continue;
                 }
 
                 // Fall back to global map.
-                if let Some(cmd) = self.global.read().get(&sc) {
+                let global = self.global.read();
+                if let Some((shortcut, cmd)) = best_shortcut_match(&global, *key, *modifiers) {
                     triggered.push(cmd.clone());
-                    consumed.push(sc);
+                    consumed.push(shortcut.to_keyboard_shortcut());
                 }
             }
 
-            for sc in consumed {
-                input.consume_key(sc.mods, sc.key);
+            for shortcut in consumed {
+                input.consume_shortcut(&shortcut);
             }
         });
 
         triggered
+    }
+}
+
+fn best_shortcut_match<C>(
+    map: &ShortcutMap<C>,
+    key: Key,
+    pressed_modifiers: Modifiers,
+) -> Option<(Shortcut, &C)> {
+    map.iter()
+        .filter(|(shortcut, _)| shortcut.key == key && pressed_modifiers.matches_logically(shortcut.mods))
+        .max_by_key(|(shortcut, _)| shortcut.specificity())
+        .map(|(shortcut, command)| (*shortcut, command))
+}
+
+impl Shortcut {
+    fn specificity(self) -> u8 {
+        self.mods.alt as u8
+            + self.mods.shift as u8
+            + self.mods.ctrl as u8
+            + self.mods.command as u8
+            + self.mods.mac_cmd as u8
+    }
+
+    fn to_keyboard_shortcut(self) -> KeyboardShortcut {
+        KeyboardShortcut::new(self.mods, self.key)
     }
 }
 
@@ -214,7 +240,8 @@ pub fn shortcut(sc: &str) -> Shortcut {
             "CTRL" | "CONTROL" => mods.ctrl = true,
             "ALT" => mods.alt = true,
             "SHIFT" => mods.shift = true,
-            "META" | "CMD" | "COMMAND" => mods.mac_cmd = true,
+            "META" => mods.mac_cmd = true,
+            "CMD" | "COMMAND" => mods.command = true,
             // Key::from_name is case-sensitive (egui uses PascalCase, e.g. "Escape", "F1", "A").
             // Pass the original part (trimmed) so "Escape" stays "Escape", not "ESCAPE".
             _ => key = Key::from_name(part),
@@ -250,8 +277,35 @@ macro_rules! shortcut_map {
 mod tests {
     use {
         super::*,
-        egui::{Key, Modifiers},
+        egui::{Event, Key, Modifiers, RawInput},
     };
+
+    fn key_event(key: Key, modifiers: Modifiers) -> Event {
+        Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    fn dispatch_raw_events(manager: &ShortcutManager<u32>, events: Vec<Event>) -> Vec<u32> {
+        let ctx = Context::default();
+        let mut triggered = None;
+
+        let _ = ctx.run(
+            RawInput {
+                events,
+                ..RawInput::default()
+            },
+            |ctx| {
+                triggered = Some(manager.dispatch_raw(ctx));
+            },
+        );
+
+        triggered.expect("dispatch should run exactly once")
+    }
 
     #[test]
     fn shortcut_single_key() {
@@ -286,6 +340,14 @@ mod tests {
     }
 
     #[test]
+    fn shortcut_command_sets_logical_command_modifier() {
+        let sc = shortcut("Cmd+S");
+        assert_eq!(sc.key, Key::S);
+        assert!(sc.mods.command);
+        assert!(!sc.mods.mac_cmd);
+    }
+
+    #[test]
     #[should_panic]
     fn shortcut_invalid_key_panics() { shortcut("Ctrl+NotAKey"); }
 
@@ -313,5 +375,57 @@ mod tests {
         m.insert(shortcut("Ctrl+S"), "save");
         assert_eq!(m[&shortcut("Ctrl+S")], "save");
         assert!(!m.contains_key(&shortcut("Ctrl+Z")));
+    }
+
+    #[test]
+    fn non_consuming_scope_still_allows_global_fallback() {
+        let global = Arc::new(RwLock::new(shortcut_map!["Ctrl+S" => 1u32]));
+        let mut manager = ShortcutManager::new(global);
+        manager.push_scope(ShortcutScope::new(
+            "editor",
+            shortcut_map!["Ctrl+S" => 2u32],
+            false,
+        ));
+
+        let triggered = dispatch_raw_events(&manager, vec![key_event(Key::S, Modifiers::CTRL)]);
+        assert_eq!(triggered, vec![2, 1]);
+    }
+
+    #[test]
+    fn consuming_scope_blocks_global_fallback() {
+        let global = Arc::new(RwLock::new(shortcut_map!["Ctrl+S" => 1u32]));
+        let mut manager = ShortcutManager::new(global);
+        manager.push_scope(ShortcutScope::new(
+            "editor",
+            shortcut_map!["Ctrl+S" => 2u32],
+            true,
+        ));
+
+        let triggered = dispatch_raw_events(&manager, vec![key_event(Key::S, Modifiers::CTRL)]);
+        assert_eq!(triggered, vec![2]);
+    }
+
+    #[test]
+    fn logical_command_shortcut_matches_command_input() {
+        let global = Arc::new(RwLock::new(shortcut_map!["Cmd+S" => 7u32]));
+        let manager = ShortcutManager::new(global);
+
+        let triggered = dispatch_raw_events(&manager, vec![key_event(Key::S, Modifiers::COMMAND)]);
+        assert_eq!(triggered, vec![7]);
+    }
+
+    #[test]
+    fn more_specific_shortcut_wins_with_logical_matching() {
+        let global = Arc::new(RwLock::new(shortcut_map![
+            "Ctrl+S" => 1u32,
+            "Ctrl+Shift+S" => 2u32,
+        ]));
+        let manager = ShortcutManager::new(global);
+
+        let triggered = dispatch_raw_events(
+            &manager,
+            vec![key_event(Key::S, Modifiers::CTRL | Modifiers::SHIFT)],
+        );
+        assert_eq!(triggered, vec![2]);
     }
 }
