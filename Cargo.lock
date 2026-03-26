@@ -70,16 +70,16 @@ dependencies = [
 
 [[package]]
 name = "egui-command"
-version = "0.1.1"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73e4bbd413a0f2894a4ce906cb4409f2d38f4a348d41fc2b2da8b34d5d6bc224"
+checksum = "6eca8852787dc87bb7050a8c729acab72e04e29e3b9ab3bc7e6830b71b78cb77"
 dependencies = [
  "rustc-hash",
 ]
 
 [[package]]
 name = "egui-command-binding"
-version = "0.1.1"
+version = "0.2.1"
 dependencies = [
  "egui",
  "egui-command",
