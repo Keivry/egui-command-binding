@@ -126,13 +126,13 @@ impl<C: Clone> ShortcutManager<C> {
     /// Matched key events are consumed from the egui input queue so that
     /// egui widgets don't double-handle them.
     ///
-    /// Returns an empty `Vec` when [`Context::wants_keyboard_input`] is `true`
+    /// Returns an empty `Vec` when [`Context::egui_wants_keyboard_input`] is `true`
     /// (i.e. a text-edit widget has focus) so that typing never fires shortcuts.
     pub fn dispatch(&self, ctx: &Context) -> Vec<CommandTriggered>
     where
         C: Into<CommandId>,
     {
-        if ctx.wants_keyboard_input() {
+        if ctx.egui_wants_keyboard_input() {
             return Vec::new();
         }
 
@@ -148,9 +148,9 @@ impl<C: Clone> ShortcutManager<C> {
     /// take priority without needing `push_scope`/`pop_scope` on a mutable static.
     /// The extra scope is always consuming: a match there skips the global map.
     ///
-    /// Returns an empty `Vec` when [`Context::wants_keyboard_input`] is `true`.
+    /// Returns an empty `Vec` when [`Context::egui_wants_keyboard_input`] is `true`.
     pub fn dispatch_raw_with_extra(&self, ctx: &Context, extra: Option<&ShortcutMap<C>>) -> Vec<C> {
-        if ctx.wants_keyboard_input() {
+        if ctx.egui_wants_keyboard_input() {
             return Vec::new();
         }
 
@@ -159,9 +159,9 @@ impl<C: Clone> ShortcutManager<C> {
 
     /// Dispatch without converting to `CommandTriggered` — returns raw `C` values.
     ///
-    /// Returns an empty `Vec` when [`Context::wants_keyboard_input`] is `true`.
+    /// Returns an empty `Vec` when [`Context::egui_wants_keyboard_input`] is `true`.
     pub fn dispatch_raw(&self, ctx: &Context) -> Vec<C> {
-        if ctx.wants_keyboard_input() {
+        if ctx.egui_wants_keyboard_input() {
             return Vec::new();
         }
 
@@ -174,7 +174,7 @@ impl<C: Clone> ShortcutManager<C> {
     /// pressed this frame; `None` otherwise.
     ///
     /// Unlike [`dispatch`] / [`dispatch_raw`], this does **not** check
-    /// `wants_keyboard_input` — use it only when you intentionally want to
+    /// `egui_wants_keyboard_input` — use it only when you intentionally want to
     /// intercept a key even while a text field has focus.
     pub fn try_shortcut(&self, ctx: &Context, sc: Shortcut) -> Option<C> {
         let global = self.global.read();
@@ -188,7 +188,7 @@ impl<C: Clone> ShortcutManager<C> {
 
     /// Shared implementation for all dispatch variants.
     ///
-    /// Does **not** check `wants_keyboard_input`; callers are responsible for
+    /// Does **not** check `egui_wants_keyboard_input`; callers are responsible for
     /// that guard. `extra`, when provided, is checked first and always consumes
     /// (a match there skips the scoped stack and global map for that key).
     fn dispatch_raw_inner(&self, ctx: &Context, extra: Option<&ShortcutMap<C>>) -> Vec<C> {
@@ -221,7 +221,9 @@ impl<C: Clone> ShortcutManager<C> {
 
                 let mut stop_propagation = false;
                 for scope in self.stack.iter().rev() {
-                    if let Some((shortcut, cmd)) = best_shortcut_match(&scope.shortcuts, *key, *modifiers) {
+                    if let Some((shortcut, cmd)) =
+                        best_shortcut_match(&scope.shortcuts, *key, *modifiers)
+                    {
                         triggered.push(cmd.clone());
                         consumed.push(shortcut.to_keyboard_shortcut());
                         if scope.consume {
@@ -256,18 +258,30 @@ fn best_shortcut_match<C>(
     pressed_modifiers: Modifiers,
 ) -> Option<(Shortcut, &C)> {
     map.iter()
-        .filter(|(shortcut, _)| shortcut.key == key && pressed_modifiers.matches_logically(shortcut.mods))
+        .filter(|(shortcut, _)| {
+            shortcut.key == key && pressed_modifiers.matches_logically(shortcut.mods)
+        })
         .max_by_key(|(shortcut, _)| shortcut.specificity())
         .map(|(shortcut, command)| (*shortcut, command))
 }
 
 fn format_shortcut(sc: &Shortcut) -> String {
     let mut parts: Vec<String> = Vec::new();
-    if sc.mods.ctrl { parts.push("Ctrl".into()); }
-    if sc.mods.alt { parts.push("Alt".into()); }
-    if sc.mods.shift { parts.push("Shift".into()); }
-    if sc.mods.command { parts.push("Cmd".into()); }
-    if sc.mods.mac_cmd { parts.push("Meta".into()); }
+    if sc.mods.ctrl {
+        parts.push("Ctrl".into());
+    }
+    if sc.mods.alt {
+        parts.push("Alt".into());
+    }
+    if sc.mods.shift {
+        parts.push("Shift".into());
+    }
+    if sc.mods.command {
+        parts.push("Cmd".into());
+    }
+    if sc.mods.mac_cmd {
+        parts.push("Meta".into());
+    }
     parts.push(format!("{:?}", sc.key));
     parts.join("+")
 }
@@ -281,9 +295,7 @@ impl Shortcut {
             + self.mods.mac_cmd as u8
     }
 
-    fn to_keyboard_shortcut(self) -> KeyboardShortcut {
-        KeyboardShortcut::new(self.mods, self.key)
-    }
+    fn to_keyboard_shortcut(self) -> KeyboardShortcut { KeyboardShortcut::new(self.mods, self.key) }
 }
 
 /// Parse a shortcut string like `"Ctrl+S"`, `"F2"`, `"Alt+Shift+X"`.
@@ -353,7 +365,7 @@ mod tests {
         let ctx = Context::default();
         let mut triggered = None;
 
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             RawInput {
                 events,
                 ..RawInput::default()
@@ -489,7 +501,11 @@ mod tests {
     }
 
     #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-    enum TestCmd { Save, Help, Quit }
+    enum TestCmd {
+        Save,
+        Help,
+        Quit,
+    }
 
     impl From<TestCmd> for egui_command::CommandId {
         fn from(c: TestCmd) -> Self { egui_command::CommandId::new(c) }
@@ -504,9 +520,18 @@ mod tests {
         let manager = ShortcutManager::new(global);
 
         let mut reg = egui_command::CommandRegistry::new()
-            .with(TestCmd::Save, egui_command::CommandSpec::new(TestCmd::Save.into(), "Save"))
-            .with(TestCmd::Help, egui_command::CommandSpec::new(TestCmd::Help.into(), "Help"))
-            .with(TestCmd::Quit, egui_command::CommandSpec::new(TestCmd::Quit.into(), "Quit"));
+            .with(
+                TestCmd::Save,
+                egui_command::CommandSpec::new(TestCmd::Save.into(), "Save"),
+            )
+            .with(
+                TestCmd::Help,
+                egui_command::CommandSpec::new(TestCmd::Help.into(), "Help"),
+            )
+            .with(
+                TestCmd::Quit,
+                egui_command::CommandSpec::new(TestCmd::Quit.into(), "Quit"),
+            );
 
         manager.fill_shortcut_hints(&mut reg);
 
@@ -515,10 +540,19 @@ mod tests {
         let quit_hint = reg.spec(TestCmd::Quit).unwrap().shortcut_hint.as_deref();
 
         assert!(save_hint.is_some(), "Save should have a shortcut hint");
-        assert!(save_hint.unwrap().contains("S"), "Save hint should mention S key");
+        assert!(
+            save_hint.unwrap().contains("S"),
+            "Save hint should mention S key"
+        );
         assert!(help_hint.is_some(), "Help should have a shortcut hint");
-        assert!(help_hint.unwrap().contains("F1"), "Help hint should contain F1");
-        assert!(quit_hint.is_none(), "Quit has no binding, hint should be None");
+        assert!(
+            help_hint.unwrap().contains("F1"),
+            "Help hint should contain F1"
+        );
+        assert!(
+            quit_hint.is_none(),
+            "Quit has no binding, hint should be None"
+        );
     }
 
     #[test]
@@ -526,8 +560,10 @@ mod tests {
         let global = Arc::new(RwLock::new(shortcut_map!["F9" => TestCmd::Quit]));
         let manager = ShortcutManager::new(global);
 
-        let mut reg = egui_command::CommandRegistry::new()
-            .with(TestCmd::Save, egui_command::CommandSpec::new(TestCmd::Save.into(), "Save"));
+        let mut reg = egui_command::CommandRegistry::new().with(
+            TestCmd::Save,
+            egui_command::CommandSpec::new(TestCmd::Save.into(), "Save"),
+        );
 
         manager.fill_shortcut_hints(&mut reg);
 

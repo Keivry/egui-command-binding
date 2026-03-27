@@ -4,7 +4,7 @@
 [![Docs.rs](https://docs.rs/egui-command-binding/badge.svg)](https://docs.rs/egui-command-binding)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/Keivry/egui-command-binding)
 
-`egui-command-binding` is the egui-specific keyboard shortcut dispatch layer for [`egui-command`](https://crates.io/crates/egui-command). 
+`egui-command-binding` is the egui-specific keyboard shortcut dispatch layer for [`egui-command`](https://crates.io/crates/egui-command).
 
 It scans `egui::Context` key events each frame, matches them against defined shortcut maps, and returns triggered commands. While `egui-command` provides the pure, UI-agnostic command model, this crate adds the necessary input handling to trigger those commands via keyboard in an egui application.
 
@@ -39,9 +39,9 @@ let global_map = Arc::new(RwLock::new(shortcut_map![
 // 2. Initialize the manager
 let manager = ShortcutManager::new(global_map);
 
-// 3. Inside your eframe update loop:
-// fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-//     let triggered = self.manager.dispatch(ctx);
+// 3. Inside your eframe ui loop:
+// fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+//     let triggered = self.manager.dispatch(ui.ctx());
 //     for cmd in triggered {
 //         // cmd is CommandTriggered { id: CommandId, source: CommandSource::Keyboard }
 //         handle(cmd);
@@ -84,14 +84,14 @@ manager.pop_scope();
 
 ## Text Input Safety
 
-By default, the `dispatch`, `dispatch_raw`, and `dispatch_raw_with_extra` methods respect keyboard focus. They return empty results when `ctx.wants_keyboard_input()` is true. This prevents accidental command triggers when the user is typing in a text field.
+By default, the `dispatch`, `dispatch_raw`, and `dispatch_raw_with_extra` methods respect keyboard focus. They return empty results when `ctx.egui_wants_keyboard_input()` is true. This prevents accidental command triggers when the user is typing in a text field.
 
 If you need to bypass this check (for example, to use the Escape key to unfocus a text field), use `try_shortcut`:
 
 ```rust
 use egui_command_binding::shortcut;
 
-if let Some(cmd) = manager.try_shortcut(ctx, shortcut("Escape")) {
+if let Some(cmd) = manager.try_shortcut(ui.ctx(), shortcut("Escape")) {
     // This fires even if a text field has focus
     handle_command(cmd);
 }
@@ -102,7 +102,7 @@ if let Some(cmd) = manager.try_shortcut(ctx, shortcut("Escape")) {
 If you use `CommandRegistry` from `egui-command` to manage command metadata (labels, descriptions), you can automatically populate the human-readable shortcut hints from your active bindings.
 
 ```rust
-// Reads the current global map and writes string hints (like "Ctrl+S") 
+// Reads the current global map and writes string hints (like "Ctrl+S")
 // into the corresponding CommandSpec::shortcut_hint fields.
 manager.fill_shortcut_hints(&mut my_command_registry);
 ```

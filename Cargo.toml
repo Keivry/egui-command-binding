@@ -1,6 +1,6 @@
 [package]
 name = "egui-command-binding"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 description = "egui integration for egui-command: shortcut matching → CommandId dispatch"
 license = "MIT OR Apache-2.0"
@@ -10,6 +10,6 @@ keywords = ["egui", "shortcut", "keybinding", "hotkey", "command"]
 categories = ["gui"]
 
 [dependencies]
-egui = "0.33"
+egui = "0.34"
 egui-command = "0.2.1"
 parking_lot = "0.12"
